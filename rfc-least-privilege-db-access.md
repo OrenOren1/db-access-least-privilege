@@ -1,8 +1,8 @@
 # RFC: Least-Privilege Access for MongoDB Atlas & RDS
 
 **Status:** Draft — pending review  
-**Story:** [#70385](https://app.shortcut.com/sentra/story/70385)  
-**Epic:** [#70383](https://app.shortcut.com/sentra/epic/70383) — Least-Privilege Access for MongoDB & RDS  
+**Story:** [#70385](https://app.shortcut.com/<org>/story/70385)  
+**Epic:** [#70383](https://app.shortcut.com/<org>/epic/70383) — Least-Privilege Access for MongoDB & RDS  
 **Author:** Platform Engineering  
 **Reviewers:** DevOps Lead, Security  
 **Created:** 2026-05-17  
@@ -21,7 +21,7 @@ Every service and human in prod currently shares one of two credentials: an `atl
 
 #### MongoDB Atlas
 
-A single database user `admin` with the built-in `atlasAdmin` role exists on the `general` cluster across all environments (prod, staging, demo). Its credentials are stored in AWS Secrets Manager as `sentra-prod-mongodb-admin-secret` and distributed to every service that touches MongoDB.
+A single database user `admin` with the built-in `atlasAdmin` role exists on the `general` cluster across all environments (prod, staging, demo). Its credentials are stored in AWS Secrets Manager as `<company>-prod-mongodb-admin-secret` and distributed to every service that touches MongoDB.
 
 **All five MongoDB consumers share this one credential:**
 
@@ -60,7 +60,7 @@ The RDS provisioning stack (`postgresql_provision/provision.py`) retrieves the *
 
 - Production MongoDB Atlas cluster `general` — all environments (prod, staging, demo)
 - Production RDS instances: `application`, `access-service`, `dagster-v2`
-- All Sentra-internal services (microservices, Debezium connectors, Dagster pipelines)
+- All [Company]-internal services (microservices, Debezium connectors, Dagster pipelines)
 - Human engineer access: read-only and break-glass
 
 ### Out of scope (v1)
@@ -143,7 +143,7 @@ metadata:
   namespace: core
 spec:
   projectRef:
-    name: sentra-prod          # AtlasProject CRD
+    name: <company>-prod          # AtlasProject CRD
   username: connectors_prod_rw
   databaseName: admin
   roles:
@@ -222,12 +222,12 @@ aws rds generate-db-auth-token \
 
 #### Option A — Atlas Identity Federation with Okta (SAML SSO) ⚠️ Assumption
 
-⚠️ **Assumption (technically possible, not yet configured).** MongoDB Atlas supports Okta as a SAML IdP via Atlas Org Federation Management. The feature exists in Atlas. Sentra has Okta at `sentrasec.okta.com` and already uses it as a SAML IdP for ArgoCD (`argocd.py` line ~210). The integration pattern is proven in the org.
+⚠️ **Assumption (technically possible, not yet configured).** MongoDB Atlas supports Okta as a SAML IdP via Atlas Org Federation Management. The feature exists in Atlas. [Company] has Okta at `<okta-domain>` and already uses it as a SAML IdP for ArgoCD (`argocd.py` line ~210). The integration pattern is proven in the org.
 
 **What would need to be done:**
 1. Atlas org-admin creates a federation config in Atlas → Organization → Federation Management
-2. Adds Okta as IdP (metadata URL from `sentrasec.okta.com`)
-3. Maps Okta groups → Atlas roles (`sentra-db-admins` → `atlasAdmin`, `sentra-db-readonly` → `human_analytics_ro`)
+2. Adds Okta as IdP (metadata URL from `<okta-domain>`)
+3. Maps Okta groups → Atlas roles (`<company>-db-admins` → `atlasAdmin`, `<company>-db-readonly` → `human_analytics_ro`)
 4. Engineers log in to Compass via `Log in with SSO` → Okta MFA → role granted from group membership
 
 **This requires:** Atlas org-admin access + Okta admin access to create the SAML app. No code changes.
@@ -237,7 +237,7 @@ aws rds generate-db-auth-token \
 # Compass: File → Connect → Advanced → Authentication: SSO
 # mongosh:
 mongosh "mongodb+srv://general-pl-0.0bjrm.mongodb.net/" \
-  --username oren@sentra.io \
+  --username engineer@company.io \
   --authenticationMechanism MONGODB-OIDC
 # Okta MFA popup → Atlas reads group membership → role granted
 ```
@@ -264,11 +264,11 @@ Audit:      Atlas audit log → Datadog (same as SSO path)
 
 #### PagerDuty → Okta group sync
 
-✅ **Confirmed possible.** The hourly GHA cron in `.github/workflows/on_callers.yaml` already polls PagerDuty and updates Slack usergroups. The Okta Python SDK (`okta ^3.0.0`) is already a dependency and the client is initialised in `okta_user_sync.py` against `sentrasec.okta.com`.
+✅ **Confirmed possible.** The hourly GHA cron in `.github/workflows/on_callers.yaml` already polls PagerDuty and updates Slack usergroups. The Okta Python SDK (`okta ^3.0.0`) is already a dependency and the client is initialised in `okta_user_sync.py` against `<okta-domain>`.
 
 **What still needs to be validated before building:**
-- Does `OKTA_SENTRASEC_ADMIN_TOKEN` (existing GHA secret) have `groups:manage` scope, or does a new token need to be issued? — **Needs Okta admin to check**
-- Does `sentra-db-admins` Okta group exist? — **Needs Okta admin to check; trivial to create if not**
+- Does `OKTA_ADMIN_TOKEN` (existing GHA secret) have `groups:manage` scope, or does a new token need to be issued? — **Needs Okta admin to check**
+- Does `<company>-db-admins` Okta group exist? — **Needs Okta admin to check; trivial to create if not**
 
 **What needs to be built (once above confirmed):**
 
@@ -323,7 +323,7 @@ A PR to temporarily add the engineer to the `prod-db-admin` PagerDuty schedule, 
 A runbook (Story #70395) will enumerate:
 - All Atlas users via `db.getUsers()` across all projects
 - All RDS roles via `SELECT usename, usecreatedb, usesuper, last_auth FROM pg_user JOIN pg_stat_activity USING (usename)`
-- All current `sentra-db-*` Okta group members vs. active employees
+- All current `<company>-db-*` Okta group members vs. active employees
 - Any user not tied to an active service secret or SSO group → immediate revocation
 
 ---
@@ -400,8 +400,8 @@ Each service keeps the old admin secret available for 2 weeks post-cutover. Roll
 - [x] ~~RDS IAM auth: confirm all prod RDS instances have `iam_database_authentication_enabled = true`~~ — **Confirmed.** Already set on `application-v2`, `dagster-v2`, `access-service` in `Pulumi.prod.yaml`.
 - [x] ~~Atlas `federation.py` — Identity Federation or Data Federation?~~ — **Confirmed Data Federation** (S3/query routing). Atlas Identity Federation (Compass SSO) is a separate unbuilt feature.
 - [ ] **Decision required:** Pursue Atlas Identity Federation (Compass SSO via Okta SAML — Section 5.2 Option A) or Secrets Manager scoped credentials (Option B, unblocked)? Option B can ship now; Option A needs Atlas org-admin + Okta admin coordination.
-- [ ] **Action required (Okta admin):** Does `OKTA_SENTRASEC_ADMIN_TOKEN` have `groups:manage` scope? If not, a new token must be issued before `okta_assign_db_admins.py` can be built. If Okta groups are not available, fall back to IAM Identity Center permission sets for RDS and dedicated Atlas user for MongoDB (Section 5.3 alternate path).
-- [ ] **Action required (Okta admin):** Does `sentra-db-admins` Okta group exist? Trivial to create; needs Okta admin console access.
+- [ ] **Action required (Okta admin):** Does `OKTA_ADMIN_TOKEN` have `groups:manage` scope? If not, a new token must be issued before `okta_assign_db_admins.py` can be built. If Okta groups are not available, fall back to IAM Identity Center permission sets for RDS and dedicated Atlas user for MongoDB (Section 5.3 alternate path).
+- [ ] **Action required (Okta admin):** Does `<company>-db-admins` Okta group exist? Trivial to create; needs Okta admin console access.
 - [ ] **Governance decision required:** Who owns the `prod-db-admin` PagerDuty schedule — Security team or DevOps lead?
 - [ ] **Governance decision required:** Which engineers are eligible for the `prod-db-admin` rotation?
 - [ ] Confirm `prod-db-admin` PagerDuty schedule ID before building `okta_assign_db_admins.py`.
@@ -412,7 +412,7 @@ Each service keeps the old admin secret available for 2 weeks post-cutover. Roll
 
 - [ ] This RFC reviewed and approved by DevOps lead
 - [ ] This RFC reviewed and approved by Security
-- [ ] Stories [#70386](https://app.shortcut.com/sentra/story/70386) (MongoDB discovery) and [#70387](https://app.shortcut.com/sentra/story/70387) (RDS discovery) outputs incorporated into Section 2 before IaC work begins
+- [ ] Stories [#70386](https://app.shortcut.com/<org>/story/70386) (MongoDB discovery) and [#70387](https://app.shortcut.com/<org>/story/70387) (RDS discovery) outputs incorporated into Section 2 before IaC work begins
 - [ ] Each downstream story (#70388–#70395) has acceptance criteria derived from this document
 - [ ] RFC merged to `docs/` repo on `main`
 
@@ -426,7 +426,7 @@ Local dev runs in two modes today:
 
 | Mode | Env file | DB target | Credentials |
 |---|---|---|---|
-| Fully local | `.env.local` | Docker Compose on `127.0.0.1` | `sentra/sentra` (dummy, safe ✓) |
+| Fully local | `.env.local` | Docker Compose on `127.0.0.1` | `local/local` (dummy, safe ✓) |
 | Staging connect | `.env.local.staging` | Real Atlas staging cluster | `MONGO_USER=admin` hardcoded ⚠️ |
 | Prod debug | `.env.local.prod` | Real Atlas **prod** cluster | `MONGO_USER=admin` hardcoded 🚨 |
 
@@ -475,8 +475,8 @@ docker compose up -d
 
 # Run your service — identical to today
 task run                    # loads .env.local
-                            # MONGO_HOSTNAME=127.0.0.1 / sentra:sentra
-                            # POSTGRES_HOSTNAME=localhost / sentra:sentra
+                            # MONGO_HOSTNAME=127.0.0.1 / [company]:[company]
+                            # POSTGRES_HOSTNAME=localhost / [company]:[company]
 ```
 
 **Nothing changes here.** `.env.local` with dummy creds stays as-is.
@@ -522,7 +522,7 @@ aws sso login --profile prod            # requires MFA
 
 # MongoDB — Compass or mongosh, browser SSO
 mongosh "mongodb+srv://general-pl-0.0bjrm.mongodb.net/" \
-  --username oren@sentra.io \
+  --username engineer@company.io \
   --authenticationMechanism MONGODB-OIDC
 # Access: human_analytics_ro — read-only on org_* databases
 # Every login triggers Atlas audit log → Datadog event
@@ -535,7 +535,7 @@ task run:prod-ro
 #### Mode 4 — Break-glass admin (on-call only)
 
 ```bash
-# Requires sentra-db-admins Okta group + MFA
+# Requires <company>-db-admins Okta group + MFA
 aws sso login --profile prod
 
 # MongoDB: atlasAdmin via SSO — auto-triggers P1 Datadog alert
@@ -569,7 +569,7 @@ tasks:
       - |
         # Postgres — IAM DB auth token (15 min expiry)
         RDS_HOST=$(aws ssm get-parameter --profile {{.ENV}} \
-          --name /sentra/{{.ENV}}/rds/application/hostname \
+          --name /company/{{.ENV}}/rds/application/hostname \
           --query Parameter.Value --output text)
         TOKEN=$(aws rds generate-db-auth-token \
           --profile {{.ENV}} \
@@ -596,7 +596,7 @@ tasks:
 .env.local.prod
 ```
 
-`.env.local.prod` must also be **purged from git history** in `sentra-connectors-service` — immediate action, independent of the rest of the epic.
+`.env.local.prod` must also be **purged from git history** in `<service-repo>` — immediate action, independent of the rest of the epic.
 
 ### 11.6 Comparison: today vs. target
 
@@ -612,10 +612,10 @@ tasks:
 
 | Group | Atlas access | RDS access |
 |---|---|---|
-| `sentra-db-developers` | `dev_staging_rw` on staging | `rds-db:connect` as `dev_rds_staging_ro` on staging |
-| `sentra-db-readonly` | `human_analytics_ro` on prod | `rds-db:connect` as `human_rds_ro` on prod |
-| `sentra-db-oncall` | `human_oncall_ro` on prod | `rds-db:connect` as `human_rds_ro` on prod |
-| `sentra-db-admins` | `break_glass_admin` on all projects | `prod-db-break-glass` IAM role (MFA required) |
+| `<company>-db-developers` | `dev_staging_rw` on staging | `rds-db:connect` as `dev_rds_staging_ro` on staging |
+| `<company>-db-readonly` | `human_analytics_ro` on prod | `rds-db:connect` as `human_rds_ro` on prod |
+| `<company>-db-oncall` | `human_oncall_ro` on prod | `rds-db:connect` as `human_rds_ro` on prod |
+| `<company>-db-admins` | `break_glass_admin` on all projects | `prod-db-break-glass` IAM role (MFA required) |
 
 ### 11.8 Revocation
 
@@ -630,7 +630,7 @@ tasks:
 
 | Task | Where | Immediate? |
 |---|---|---|
-| Delete `.env.local.prod`, purge git history | `sentra-connectors-service` | **Yes — do now** |
+| Delete `.env.local.prod`, purge git history | `<service-repo>` | **Yes — do now** |
 | Add `.env.local.*.generated` to `.gitignore` | All service repos | **Yes — do now** |
 | Configure Okta as Atlas SAML IdP | Atlas Org Federation Management | Story #70393 |
 | Create Okta groups and assign engineers | Okta admin console | Story #70393 |
@@ -647,14 +647,14 @@ tasks:
 
 | Component | Location |
 |---|---|
-| Atlas Pulumi provisioning | `sentra-infrastructure/mongodb_provision/mongodb.py` |
-| RDS Pulumi provisioning | `sentra-infrastructure/postgresql_provision/provision.py` |
-| Prod MongoDB stack config | `sentra-infrastructure/Pulumi.prod-mongodb-provision.yaml` |
-| Prod RDS stack config | `sentra-infrastructure/Pulumi.prod-postgresql-provision.yaml` |
+| Atlas Pulumi provisioning | `infrastructure/mongodb_provision/mongodb.py` |
+| RDS Pulumi provisioning | `infrastructure/postgresql_provision/provision.py` |
+| Prod MongoDB stack config | `infrastructure/Pulumi.prod-mongodb-provision.yaml` |
+| Prod RDS stack config | `infrastructure/Pulumi.prod-postgresql-provision.yaml` |
 | Atlas Operator ArgoCD ApplicationSet | `argocd/infra/mongodb-operator_applicationset.yaml` |
 | Atlas Operator Helm values | `argocd/infra/values/mongodb-operator_values.yaml` |
-| Connectors-service prod K8s values | `sentra-connectors-service/kubernetes/connectors-service/values.prod.yaml` |
-| Data-feed prod K8s values | `sentra-data-feed/kubernetes/data-feed/values.prod.yaml` |
-| PagerDuty on-call fetcher (existing) | `sentra-infrastructure/scripts/pager_duty_get_on_callers.py` |
-| PagerDuty → Slack group updater (existing, pattern for Okta) | `sentra-infrastructure/scripts/slack_assign_on_call_groups.py` |
-| Okta API client (existing) | `sentra-infrastructure/scripts/okta_user_sync.py` |
+| Connectors-service prod K8s values | `<service-repo>/kubernetes/connectors-service/values.prod.yaml` |
+| Data-feed prod K8s values | `<service-repo>/kubernetes/data-feed/values.prod.yaml` |
+| PagerDuty on-call fetcher (existing) | `infrastructure/scripts/pager_duty_get_on_callers.py` |
+| PagerDuty → Slack group updater (existing, pattern for Okta) | `infrastructure/scripts/slack_assign_on_call_groups.py` |
+| Okta API client (existing) | `infrastructure/scripts/okta_user_sync.py` |

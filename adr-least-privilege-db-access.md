@@ -2,8 +2,8 @@
 
 **Status:** Accepted  
 **Date:** 2026-05-17  
-**Story:** [#70385](https://app.shortcut.com/sentra/story/70385)  
-**Epic:** [#70383](https://app.shortcut.com/sentra/epic/70383)  
+**Story:** [#70385](https://app.shortcut.com/<org>/story/70385)  
+**Epic:** [#70383](https://app.shortcut.com/<org>/epic/70383)  
 **RFC:** [rfc-least-privilege-db-access.md](./rfc-least-privilege-db-access.md)
 
 ---
@@ -24,7 +24,7 @@
 
 ## Context
 
-Every Sentra service and human in production currently shares one of two credentials:
+Every [Company] service and human in production currently shares one of two credentials:
 
 - **MongoDB Atlas:** single `admin` user with `atlasAdmin` role, shared by all services and all engineers
 - **RDS / PostgreSQL:** master RDS credentials distributed verbatim to every service secret (~25 services)
@@ -239,19 +239,19 @@ flowchart TD
         SCHED["prod-db-admin schedule\nmanaged via UI by Security/DevOps"]
     end
 
-    subgraph gha["GitHub Actions (sentra-infrastructure)"]
+    subgraph gha["GitHub Actions ([company]-infrastructure)"]
         CRON["on_callers.yaml\ncron: every hour"]
         STEP1["step 1: get-pagerduty-on-callers\non_callers.json"]
         STEP2["step 2: set-slack-on-callers ✅"]
         STEP3["step 3: set-okta-db-admins ⚠️ to build"]
     end
 
-    subgraph okta["Okta (sentrasec.okta.com)"]
-        GROUP["sentra-db-admins group"]
+    subgraph okta["Okta (<okta-domain>)"]
+        GROUP["<company>-db-admins group"]
     end
 
     subgraph access["On-call engineer access"]
-        ATLAS["Atlas: atlasAdmin via SAML\n(sentra-db-admins → break_glass_admin role)"]
+        ATLAS["Atlas: atlasAdmin via SAML\n(<company>-db-admins → break_glass_admin role)"]
         RDS_OP["RDS: 15-min IAM token\naws rds generate-db-auth-token"]
     end
 
@@ -362,13 +362,13 @@ sequenceDiagram
 
     Note over PD,GHA: Shift starts on prod-db-admin schedule
     PD-->>GHA: polled — engineer assigned to prod-db-admin
-    GHA->>Okta: add engineer to sentra-db-admins group
+    GHA->>Okta: add engineer to <company>-db-admins group
     Okta-->>GHA: 200 OK
     GHA->>GHA: POST #db-security-alerts — access granted
 
     Note over Eng,Atlas: Engineer connects (within 1h of shift start)
     Eng->>Atlas: mongosh --authenticationMechanism MONGODB-OIDC
-    Atlas->>Okta: SAML assertion — is engineer in sentra-db-admins?
+    Atlas->>Okta: SAML assertion — is engineer in <company>-db-admins?
     Okta-->>Atlas: yes
     Atlas-->>Eng: atlasAdmin role granted
     Note over Atlas: P1 Datadog alert fires on atlasAdmin auth
@@ -382,7 +382,7 @@ sequenceDiagram
 
     Note over PD,GHA: Shift ends
     PD-->>GHA: polled — engineer removed from prod-db-admin
-    GHA->>Okta: remove engineer from sentra-db-admins
+    GHA->>Okta: remove engineer from <company>-db-admins
     GHA->>GHA: POST #db-security-alerts — access revoked
     Note over Atlas: Next SAML session attempt denied
 ```
@@ -524,12 +524,12 @@ flowchart LR
 
 | Resource | Location |
 |---|---|
-| RFC | `sentra/docs/rfc-least-privilege-db-access.md` |
-| Atlas Pulumi provisioning | `sentra-infrastructure/mongodb_provision/mongodb.py` |
-| RDS Pulumi provisioning | `sentra-infrastructure/postgresql_provision/provision.py` |
-| On-callers GHA workflow | `sentra-infrastructure/.github/workflows/on_callers.yaml` |
-| PagerDuty on-callers script | `sentra-infrastructure/scripts/pager_duty_get_on_callers.py` |
-| Slack on-callers script (template for Okta) | `sentra-infrastructure/scripts/slack_assign_on_call_groups.py` |
-| Okta user sync script | `sentra-infrastructure/scripts/okta_user_sync.py` |
-| Atlas Operator ArgoCD ApplicationSet | `sentra/argocd/infra/mongodb-operator_applicationset.yaml` |
-| Prod RDS stack config | `sentra-infrastructure/Pulumi.prod.yaml` |
+| RFC | `docs/rfc-least-privilege-db-access.md` |
+| Atlas Pulumi provisioning | `infrastructure/mongodb_provision/mongodb.py` |
+| RDS Pulumi provisioning | `infrastructure/postgresql_provision/provision.py` |
+| On-callers GHA workflow | `infrastructure/.github/workflows/on_callers.yaml` |
+| PagerDuty on-callers script | `infrastructure/scripts/pager_duty_get_on_callers.py` |
+| Slack on-callers script (template for Okta) | `infrastructure/scripts/slack_assign_on_call_groups.py` |
+| Okta user sync script | `infrastructure/scripts/okta_user_sync.py` |
+| Atlas Operator ArgoCD ApplicationSet | `argocd/infra/mongodb-operator_applicationset.yaml` |
+| Prod RDS stack config | `infrastructure/Pulumi.prod.yaml` |
